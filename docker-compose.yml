@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: my_expenses
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - expenses-network
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: my_expenses
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      API_KEY: my-expenses-secret-key
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - expenses-network
+
+  bot:
+    build:
+      context: .
+      dockerfile: bot/Dockerfile
+    env_file:
+      - .env.bot
+    volumes:
+      - ./.env.bot:/app/.env.bot:ro
+    environment:
+      API_BASE_URL: http://api:8000
+      API_KEY: my-expenses-secret-key
+      LLM_API_BASE_URL: http://se-toolkit-lab-8-qwen-code-api-1:8080
+      LLM_API_KEY: MAspru6EANtFaSppUxP3eEA3e6gPiJLHJscwB3HHlSv2mWvI0PS9BBlroXhGe-Pkgd8Ag6Ych3St5vw7EI4YQw
+      LLM_MODEL: coder-model
+    depends_on:
+      - api
+    networks:
+      - expenses-network
+      - lms-network
+
+volumes:
+  postgres_data:
+
+networks:
+  expenses-network:
+    driver: bridge
+  lms-network:
+    external: true
+    name: lms-network
