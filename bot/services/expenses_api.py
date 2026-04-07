@@ -1,5 +1,5 @@
+
 import httpx
-from typing import Optional
 
 from bot.config import settings
 
@@ -17,8 +17,8 @@ class ExpensesAPIClient:
         telegram_user_id: int,
         amount: float,
         category: str,
-        description: Optional[str] = None,
-    ) -> Optional[dict]:
+        description: str | None = None,
+    ) -> dict | None:
         payload = {
             "telegram_user_id": telegram_user_id,
             "amount": str(amount),
@@ -35,7 +35,7 @@ class ExpensesAPIClient:
                 return response.json()
             return None
 
-    async def get_last_expense(self, telegram_user_id: int) -> Optional[dict]:
+    async def get_last_expense(self, telegram_user_id: int) -> dict | None:
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{self.base_url}/api/expenses/last/{telegram_user_id}",
@@ -46,7 +46,7 @@ class ExpensesAPIClient:
                 return data if data else None
             return None
 
-    async def delete_last_expense(self, telegram_user_id: int) -> Optional[dict]:
+    async def delete_last_expense(self, telegram_user_id: int) -> dict | None:
         async with httpx.AsyncClient() as client:
             response = await client.delete(
                 f"{self.base_url}/api/expenses/last/{telegram_user_id}",
@@ -101,7 +101,7 @@ class ExpensesAPIClient:
                 return response.json()
             return []
 
-    async def get_prev_expense_date(self, telegram_user_id: int, current_date: str) -> Optional[str]:
+    async def get_prev_expense_date(self, telegram_user_id: int, current_date: str) -> str | None:
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{self.base_url}/api/expenses/prev-date/{telegram_user_id}/{current_date}",
@@ -111,7 +111,7 @@ class ExpensesAPIClient:
                 return response.json().get("date")
             return None
 
-    async def get_next_expense_date(self, telegram_user_id: int, current_date: str) -> Optional[str]:
+    async def get_next_expense_date(self, telegram_user_id: int, current_date: str) -> str | None:
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{self.base_url}/api/expenses/next-date/{telegram_user_id}/{current_date}",

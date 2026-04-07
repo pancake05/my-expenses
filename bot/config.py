@@ -1,6 +1,5 @@
-from pydantic_settings import BaseSettings
 from pydantic import Field
-from typing import Optional
+from pydantic_settings import BaseSettings
 
 
 class BotSettings(BaseSettings):
@@ -8,9 +7,9 @@ class BotSettings(BaseSettings):
     api_base_url: str = Field(default="http://localhost:8000", alias="API_BASE_URL")
     api_key: str = Field(default="my-expenses-secret-key", alias="API_KEY")
 
-    # LLM settings for expense parsing
-    llm_api_base_url: Optional[str] = Field(default=None, alias="LLM_API_BASE_URL")
-    llm_api_key: Optional[str] = Field(default=None, alias="LLM_API_KEY")
+    # LLM Configuration (for AI expense parsing)
+    llm_api_base_url: str = Field(default="http://localhost:8080", alias="LLM_API_BASE_URL")
+    llm_api_key: str = Field(default="", alias="LLM_API_KEY")
     llm_model: str = Field(default="coder-model", alias="LLM_MODEL")
 
     class Config:

@@ -1,202 +1,188 @@
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
+import re
 from datetime import date
 
+from aiogram import Router
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
+
 from bot.handlers.keyboards import (
-    get_category_keyboard,
-    get_main_menu_keyboard,
-    get_date_selection_keyboard,
-    get_date_navigation_keyboard,
-    get_confirm_keyboard,
     format_moscow_time_short,
+    get_category_keyboard,
+    get_date_navigation_keyboard,
+    get_date_selection_keyboard,
+    get_llm_confirm_keyboard,
+    get_main_menu_keyboard,
 )
 from bot.services.expenses_api import api_client
-from bot.services.local_expense_parser import parse_expense
+from bot.services.llm_parser import llm_parser
 
 router = Router()
 
 
 class ExpenseStates(StatesGroup):
     waiting_for_amount = State()
-    waiting_for_category = State()
-    llm_confirm = State()
+    waiting_for_llm_confirm = State()
+
+
+def _is_llm_trigger(text: str) -> bool:
+    """
+    Detect if input looks like a natural-language expense description.
+    Examples: 'bus 300', 'lunch 500', 'taxi 1200', 'coffee 150'.
+
+    Heuristic: text contains at least one alphabetic word AND a number.
+    Pure numeric inputs (like '300' or '300.50') are NOT LLM triggers.
+    """
+    text = text.strip()
+    has_alpha = bool(re.search(r"[a-zA-Zа-яА-ЯёЁ]", text))
+    has_number = bool(re.search(r"\d", text))
+    return has_alpha and has_number
 
 
 @router.message(ExpenseStates.waiting_for_amount)
 async def process_amount(message: Message, state: FSMContext):
-    text = message.text.strip().replace(",", ".")
+    """Extract amount — either pure number (classic flow) or natural text (LLM flow)."""
+    text = message.text.strip()
 
-    # Try parsing as a plain number first
+    if _is_llm_trigger(text):
+        await _handle_llm_flow(message, state, text)
+        return
+
+    # Classic flow: pure numeric amount
+    cleaned = text.replace(",", ".")
     try:
-        amount = float(text)
+        amount = float(cleaned)
         if amount <= 0:
             await message.answer("❌ Please enter a positive number.")
             return
-        await state.update_data(amount=amount)
-        await state.set_state(ExpenseStates.waiting_for_category)
-        await message.answer(
-            "📂 Select a category:",
-            reply_markup=get_category_keyboard(),
-        )
-        return
     except ValueError:
-        pass  # Not a plain number, try local parser
-
-    # Fall back to local expense parsing
-    parsed = parse_expense(text)
-
-    if parsed and not parsed.error and parsed.amount > 0:
-        await state.update_data(
-            amount=parsed.amount,
-            category=parsed.category,
-            description=parsed.description,
-        )
-        await state.set_state(ExpenseStates.llm_confirm)
-
-        category_emoji = {"Food": "🍔", "Transport": "🚗"}.get(parsed.category, "📦")
-        desc_text = f"\n📝 {parsed.description}" if parsed.description else ""
-        await message.answer(
-            f"📋 *Record expense?*\n\n"
-            f"💵 Amount: *{parsed.amount}*\n"
-            f"📂 Category: {category_emoji} *{parsed.category}*{desc_text}",
-            parse_mode="Markdown",
-            reply_markup=get_confirm_keyboard(),
-        )
+        await message.answer("❌ Invalid amount. Please enter a number (e.g., 150.50):")
         return
 
-    await message.answer("❌ Invalid amount. Please enter a number (e.g., 150.50):")
+    await state.update_data(amount=amount)
+    await message.answer(
+        "📂 Select a category:",
+        reply_markup=get_category_keyboard(),
+    )
 
 
-# ---------- LLM-powered expense parsing ----------
+async def _handle_llm_flow(message: Message, state: FSMContext, text: str):
+    """Send text to LLM, then show confirmation dialog. Falls back to manual parsing."""
+    await message.answer("🤖 Analyzing your expense...")
 
-@router.message(F.text, ~F.from_user.state)
-async def llm_parse_expense_fallback(message: Message, state: FSMContext):
-    """Handle free-text expense descriptions using local parser."""
-    current_state = await state.get_state()
-    if current_state is not None:
-        return  # Some other handler is active
+    result = await llm_parser.parse_expense(text)
 
-    text = message.text.strip()
-    if len(text) < 3:
-        return  # Too short, ignore
+    if result is None:
+        # Fallback: try to extract amount from text manually
+        cleaned = text.replace(",", ".")
+        numbers = re.findall(r"[\d]+\.?[\d]*", cleaned)
+        if numbers:
+            amount = float(numbers[-1])  # Take the last number found
+            if amount > 0:
+                await state.update_data(
+                    amount=amount,
+                    llm_category="Other",
+                    llm_description=text,
+                )
+                await state.set_state(ExpenseStates.waiting_for_llm_confirm)
+                await message.answer(
+                    f"🤖 I couldn't auto-detect the category, but I found the amount:\n\n"
+                    f"💵 Amount: *{amount}*\n"
+                    f"📂 Category: 📦 *Other*\n"
+                    f"📝 Description: {text}\n\n"
+                    f"Confirm or adjust:",
+                    reply_markup=get_llm_confirm_keyboard(),
+                    parse_mode="Markdown",
+                )
+                return
 
-    parsed = parse_expense(text)
-
-    if parsed is None or parsed.error:
         await message.answer(
-            "🤔 I couldn't understand the expense. Please try again or use the buttons below.",
+            "❌ Couldn't parse the expense. Please try again with a clear format, e.g. 'bus 300'."
+        )
+        await message.answer(
+            "💰 What would you like to do?",
             reply_markup=get_main_menu_keyboard(),
         )
         return
 
-    category_emoji = {"Food": "🍔", "Transport": "🚗"}.get(parsed.category, "📦")
-
     await state.update_data(
-        amount=parsed.amount,
-        category=parsed.category,
-        description=parsed.description,
+        amount=result["amount"],
+        llm_category=result["category"],
+        llm_description=result["description"],
     )
-    await state.set_state(ExpenseStates.llm_confirm)
+    await state.set_state(ExpenseStates.waiting_for_llm_confirm)
 
-    desc_text = f"\n📝 {parsed.description}" if parsed.description else ""
+    category_emoji = {"Food": "🍔", "Transport": "🚗"}.get(result["category"], "📦")
+
     await message.answer(
-        f"📋 *Record expense?*\n\n"
-        f"💵 Amount: *{parsed.amount}*\n"
-        f"📂 Category: {category_emoji} *{parsed.category}*{desc_text}",
+        f"🤖 I understood:\n\n"
+        f"💵 Amount: *{result['amount']}*\n"
+        f"📂 Category: {category_emoji} *{result['category']}*\n"
+        f"📝 Description: {result['description']}\n\n"
+        f"Confirm or adjust:",
+        reply_markup=get_llm_confirm_keyboard(),
         parse_mode="Markdown",
-        reply_markup=get_confirm_keyboard(),
     )
 
 
-@router.callback_query(lambda c: c.data.startswith("llm_confirm:"))
-async def llm_confirm_callback(callback: CallbackQuery, state: FSMContext):
-    """Confirm or cancel LLM-parsed expense via buttons."""
-    action = callback.data.split(":")[1]
+@router.callback_query(ExpenseStates.waiting_for_llm_confirm)
+async def process_llm_confirm(callback: CallbackQuery, state: FSMContext):
+    """Handle Yes / No / Save as Other for LLM-parsed expense."""
+    data = await state.get_data()
+    amount = data.get("amount")
+    llm_category = data.get("llm_category")
+    llm_description = data.get("llm_description", "")
 
-    if action == "yes":
-        data = await state.get_data()
-        amount = data.get("amount")
-        category = data.get("category")
-        description = data.get("description")
-
-        expense = await api_client.create_expense(
-            telegram_user_id=callback.from_user.id,
-            amount=amount,
-            category=category,
-            description=description,
-        )
-
-        if expense:
-            await state.clear()
-            time_str = format_moscow_time_short(expense["created_at"])
-            category_emoji = {"Food": "🍔", "Transport": "🚗"}.get(expense["category"], "📦")
-            await callback.message.edit_text(
-                f"✅ *Expense Recorded!*\n\n"
-                f"💵 Amount: {expense['amount']}\n"
-                f"📂 Category: {category_emoji} {expense['category']}\n"
-                f"🕐 Time: {time_str}",
-                parse_mode="Markdown",
-            )
-            await callback.message.answer(
-                "💰 What would you like to do next?",
-                reply_markup=get_main_menu_keyboard(),
-            )
-        else:
-            await state.clear()
-            await callback.message.edit_text("❌ Failed to record expense. Please try again.")
-            await callback.message.answer(
-                "💰 What would you like to do?",
-                reply_markup=get_main_menu_keyboard(),
-            )
-    elif action == "other":
-        # Save as "Other" category regardless of what LLM detected
-        data = await state.get_data()
-        amount = data.get("amount")
-        description = data.get("description")
-
-        expense = await api_client.create_expense(
-            telegram_user_id=callback.from_user.id,
-            amount=amount,
-            category="Other",
-            description=description,
-        )
-
-        if expense:
-            await state.clear()
-            time_str = format_moscow_time_short(expense["created_at"])
-            await callback.message.edit_text(
-                f"✅ *Expense Recorded!*\n\n"
-                f"💵 Amount: {expense['amount']}\n"
-                f"📂 Category: 📦 {expense['category']}\n"
-                f"🕐 Time: {time_str}",
-                parse_mode="Markdown",
-            )
-            await callback.message.answer(
-                "💰 What would you like to do next?",
-                reply_markup=get_main_menu_keyboard(),
-            )
-        else:
-            await state.clear()
-            await callback.message.edit_text("❌ Failed to record expense. Please try again.")
-            await callback.message.answer(
-                "💰 What would you like to do?",
-                reply_markup=get_main_menu_keyboard(),
-            )
-    else:
+    if callback.data == "llm_confirm:no":
+        # Cancel entirely
         await state.clear()
         await callback.message.edit_text("❌ Expense recording cancelled.")
         await callback.message.answer(
             "💰 What would you like to do?",
             reply_markup=get_main_menu_keyboard(),
         )
+        await callback.answer()
+        return
+
+    # Determine final category
+    if callback.data == "llm_confirm:other":
+        category = "Other"
+        category_emoji = "📦"
+    else:
+        category = llm_category
+        category_emoji = {"Food": "🍔", "Transport": "🚗"}.get(category, "📦")
+
+    expense = await api_client.create_expense(
+        telegram_user_id=callback.from_user.id,
+        amount=amount,
+        category=category,
+        description=llm_description,
+    )
+
+    if expense:
+        await state.clear()
+        time_str = format_moscow_time_short(expense["created_at"])
+        await callback.message.edit_text(
+            f"✅ *Expense Recorded!*\n\n"
+            f"💵 Amount: {expense['amount']}\n"
+            f"📂 Category: {category_emoji} {expense['category']}\n"
+            f"📝 {llm_description}\n"
+            f"🕐 Time: {time_str}",
+            parse_mode="Markdown",
+        )
+        await callback.message.answer(
+            "💰 What would you like to do next?",
+            reply_markup=get_main_menu_keyboard(),
+        )
+    else:
+        await callback.message.edit_text("❌ Failed to record expense. Please try again.")
 
     await callback.answer()
 
 
-@router.callback_query(ExpenseStates.waiting_for_category)
+@router.callback_query(ExpenseStates.waiting_for_amount)
 async def process_category(callback: CallbackQuery, state: FSMContext):
+    """User selected a category — create the expense."""
     data = await state.get_data()
     amount = data.get("amount")
 
@@ -248,7 +234,7 @@ async def process_category(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(lambda c: c.data == "record")
 async def callback_record(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ExpenseStates.waiting_for_amount)
-    await callback.message.edit_text("💵 Enter what you spent on and the amount:")
+    await callback.message.edit_text("💵 Enter the amount:")
     await callback.answer()
 
 
@@ -265,7 +251,7 @@ async def callback_today(callback: CallbackQuery):
         return
 
     total = await api_client.get_total_today(callback.from_user.id)
-    text = f"📋 *Today's Expenses*\n\n"
+    text = "📋 *Today's Expenses*\n\n"
     for i, exp in enumerate(expenses, 1):
         time_str = format_moscow_time_short(exp["created_at"])
         category_emoji = {"Food": "🍔", "Transport": "🚗"}.get(exp["category"], "📦")
@@ -358,7 +344,7 @@ async def show_expenses_for_date(message, telegram_user_id: int, target_date: da
     target_date_str = target_date.strftime("%d.%m.%Y")
     current_iso = target_date.isoformat()
 
-    expenses = await api_client.get_expenses_by_date(telegram_user_id, target_date)
+    expenses = await api_client.get_expenses_by_date(telegram_user_id, current_iso)
 
     # Check prev/next dates
     prev_date = await api_client.get_prev_expense_date(telegram_user_id, current_iso)

@@ -1,6 +1,6 @@
-from typing import Optional
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from datetime import date, timedelta, datetime, timezone, time as dt_time
+from datetime import date, datetime, timedelta, timezone
+
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def format_moscow_time(utc_iso: str) -> str:
@@ -90,7 +90,11 @@ def get_date_selection_keyboard(dates: list[str]) -> InlineKeyboardMarkup:
     return keyboard
 
 
-def get_date_navigation_keyboard(selected_date: date, prev_date: Optional[str], next_date: Optional[str]) -> InlineKeyboardMarkup:
+def get_date_navigation_keyboard(
+    selected_date: date,
+    prev_date: str | None,
+    next_date: str | None,
+) -> InlineKeyboardMarkup:
     date_str = selected_date.strftime("%d.%m.%Y")
 
     row = []
@@ -112,6 +116,22 @@ def get_date_navigation_keyboard(selected_date: date, prev_date: Optional[str], 
             [
                 InlineKeyboardButton(text="📋 Today", callback_data="today"),
                 InlineKeyboardButton(text="🔙 All Dates", callback_data="by_date"),
+            ],
+        ]
+    )
+    return keyboard
+
+
+def get_llm_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Keyboard for confirming LLM-parsed expense: Yes / No / Save as Other."""
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Yes", callback_data="llm_confirm:yes"),
+                InlineKeyboardButton(text="❌ No", callback_data="llm_confirm:no"),
+            ],
+            [
+                InlineKeyboardButton(text="💾 Save as Other", callback_data="llm_confirm:other"),
             ],
         ]
     )

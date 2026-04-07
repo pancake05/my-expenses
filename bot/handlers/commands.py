@@ -1,11 +1,10 @@
 from aiogram import Router
-from aiogram.types import Message, CallbackQuery
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
+from aiogram.types import Message
 
-from bot.handlers.keyboards import get_start_keyboard, get_main_menu_keyboard
 from bot.handlers.expense import ExpenseStates
-from bot.handlers.keyboards import format_moscow_time_short
+from bot.handlers.keyboards import format_moscow_time_short, get_main_menu_keyboard, get_start_keyboard
 
 router = Router()
 
@@ -41,7 +40,7 @@ async def cmd_help(message: Message):
 async def cmd_record(message: Message, state: FSMContext):
     await state.set_state(ExpenseStates.waiting_for_amount)
     await message.answer(
-        "💵 Enter what you spent on and the amount:",
+        "💵 Enter the amount (e.g., 150.50):",
     )
 
 
@@ -59,7 +58,7 @@ async def cmd_today(message: Message):
         return
 
     total = await api_client.get_total_today(message.from_user.id)
-    text = f"📋 *Today's Expenses*\n\n"
+    text = "📋 *Today's Expenses*\n\n"
     for i, exp in enumerate(expenses, 1):
         time_str = format_moscow_time_short(exp["created_at"])
         category_emoji = {"Food": "🍔", "Transport": "🚗"}.get(exp["category"], "📦")

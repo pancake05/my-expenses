@@ -48,9 +48,6 @@ services:
     environment:
       API_BASE_URL: http://api:8000
       API_KEY: my-expenses-secret-key
-      LLM_API_BASE_URL: http://se-toolkit-lab-8-qwen-code-api-1:8080
-      LLM_API_KEY: MAspru6EANtFaSppUxP3eEA3e6gPiJLHJscwB3HHlSv2mWvI0PS9BBlroXhGe-Pkgd8Ag6Ych3St5vw7EI4YQw
-      LLM_MODEL: coder-model
     depends_on:
       - api
     networks:
