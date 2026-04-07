@@ -234,7 +234,7 @@ async def process_category(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(lambda c: c.data == "record")
 async def callback_record(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ExpenseStates.waiting_for_amount)
-    await callback.message.edit_text("💵 Enter the amount:")
+    await callback.message.edit_text("💵 Enter what you spent on and the amount:")
     await callback.answer()
 
 

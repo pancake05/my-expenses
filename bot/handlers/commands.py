@@ -40,7 +40,7 @@ async def cmd_help(message: Message):
 async def cmd_record(message: Message, state: FSMContext):
     await state.set_state(ExpenseStates.waiting_for_amount)
     await message.answer(
-        "💵 Enter the amount (e.g., 150.50):",
+        "💵 Enter what you spent on and the amount (e.g., Lunch 150.50):",
     )
 
 
